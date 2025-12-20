@@ -30,19 +30,11 @@ func NewMutex(db fdb.Transactor, path []string, name string) (*Mutex, error) {
 		return nil, fmt.Errorf("%w: failed to open queue dir", err)
 	}
 
-	x := &Mutex{
+	return &Mutex{
 		name:  name,
 		root:  root,
 		queue: queue,
-	}
-
-	// Start the IDs at 1.
-	_, err = x.getAndIncID(db)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to init next ID", err)
-	}
-
-	return x, nil
+	}, nil
 }
 
 func (x *Mutex) TryAcquire(db fdb.Transactor) (bool, error) {
@@ -53,19 +45,40 @@ func (x *Mutex) Release(db fdb.Transactor) error {
 	panic("not implemented")
 }
 
-// getOwner returns the name and heartbeat of the client currently
-// holding the mutex.
-func (x *Mutex) getOwner(db fdb.Transactor) (string, error) {
-	key := x.root.Pack(tuple.Tuple{"holder"})
+// getOwner returns the name and heartbeat of the client currently holding the mutex.
+func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
+	type Owner struct {
+		name  string
+		hbeat []byte
+	}
 
-	name, err := db.ReadTransact(func(tr fdb.ReadTransaction) (any, error) {
-		// TODO: Use value for heartbeat, return name & heartbeat.
-		return string(tr.Get(key).MustGet()), nil
+	rngRoot, err := fdb.PrefixRange(x.root.Bytes())
+	if err != nil {
+		return "", nil, err
+	}
+
+	owner, err := db.ReadTransact(func(tr fdb.ReadTransaction) (any, error) {
+		iter := tr.GetRange(rngRoot, fdb.RangeOptions{Limit: 1}).Iterator()
+		if !iter.Advance() {
+			return nil, nil
+		}
+
+		kv := iter.MustGet()
+		tup, err := tuple.Unpack(kv.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		return Owner{
+			name:  tup[0].(string),
+			hbeat: kv.Value,
+		}, nil
 	})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return name.(string), nil
+	o := owner.(Owner)
+	return o.name, o.hbeat, nil
 }
 
 // enqueue places the client in the queue for control of the mutex.
