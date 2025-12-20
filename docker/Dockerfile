@@ -11,7 +11,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install FoundationDB client library.
-ARG FDB_VERSION=7.3.43
+ARG FDB_VERSION=7.4.5
 RUN curl -Lo /fdb.deb "https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb" && \
     dpkg -i /fdb.deb && \
     rm /fdb.deb

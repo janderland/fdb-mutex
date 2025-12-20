@@ -2,7 +2,7 @@ module github.com/janderland/fdb-mutex
 
 go 1.23
 
-require github.com/apple/foundationdb/bindings/go v0.0.0-20240520132641-412531b5c97f
+require github.com/apple/foundationdb/bindings/go v0.0.0-20250911184653-27f7192f47c3
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
