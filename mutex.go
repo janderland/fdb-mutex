@@ -10,16 +10,10 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
-// Forward the Tuple type into the current namespace.
-type Tuple = tuple.Tuple
-
 type Mutex struct {
 	name  string
 	root  subspace.Subspace
 	queue subspace.Subspace
-
-	// TODO: Scan the queue instead of using an index.
-	index subspace.Subspace
 }
 
 // NewMutex constructs a distributed mutex. 'path' is the directory path where
@@ -36,16 +30,10 @@ func NewMutex(db fdb.Transactor, path []string, name string) (*Mutex, error) {
 		return nil, fmt.Errorf("%w: failed to open queue dir", err)
 	}
 
-	index, err := root.Open(db, []string{"index"}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to open index dir", err)
-	}
-
 	x := &Mutex{
 		name:  name,
 		root:  root,
 		queue: queue,
-		index: index,
 	}
 
 	// Start the IDs at 1.
@@ -65,27 +53,10 @@ func (x *Mutex) Release(db fdb.Transactor) error {
 	panic("not implemented")
 }
 
-// getAndIncID returns the next queue ID before incrementing the ID.
-func (x *Mutex) getAndIncID(db fdb.Transactor) (uint64, error) {
-	key := x.root.Pack(Tuple{"next_id"})
-
-	id, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-		tr.Add(key, []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
-		val := tr.Get(key).MustGet()
-		if val == nil {
-			return 0, nil
-		}
-		return binary.LittleEndian.Uint64(val), nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	return id.(uint64), nil
-}
-
-// getHolder returns the name of the client currently holding the mutex.
-func (x *Mutex) getHolder(db fdb.Transactor) (string, error) {
-	key := x.root.Pack(Tuple{"holder"})
+// getOwner returns the name and heartbeat of the client currently
+// holding the mutex.
+func (x *Mutex) getOwner(db fdb.Transactor) (string, error) {
+	key := x.root.Pack(tuple.Tuple{"holder"})
 
 	name, err := db.ReadTransact(func(tr fdb.ReadTransaction) (any, error) {
 		// TODO: Use value for heartbeat, return name & heartbeat.
@@ -97,30 +68,43 @@ func (x *Mutex) getHolder(db fdb.Transactor) (string, error) {
 	return name.(string), nil
 }
 
+// enqueue places the client in the queue for control of the mutex.
 func (x *Mutex) enqueue(db fdb.Transactor) error {
-	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-		id, err := x.getAndIncID(tr)
+	rngQueue, err := fdb.PrefixRange(x.queue.Bytes())
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Transact(func(tr fdb.Transaction) (any, error) {
+		iter := tr.GetRange(rngQueue, fdb.RangeOptions{}).Iterator()
+
+		// If we're already enqueued, skip this operation.
+		for iter.Advance() {
+			if x.name == string(iter.MustGet().Value) {
+				return nil, nil
+			}
+		}
+
+		tup := tuple.Tuple{tuple.IncompleteVersionstamp(0)}
+		key, err := tup.PackWithVersionstamp(x.queue.Bytes())
 		if err != nil {
 			return nil, err
 		}
-
-		keyQueue := x.queue.Pack(Tuple{id})
-		keyIndex := x.index.Pack(Tuple{x.name})
-
-		tr.Set(keyQueue, nil)
-		tr.Set(keyIndex, []byte(x.name))
+		tr.Set(fdb.Key(key), []byte(x.name))
 		return nil, nil
 	})
 	return err
 }
 
+// dequeue pops a client off the front of the queue
+// and gives them control of the mutex.
 func (x *Mutex) dequeue(db fdb.Transactor) error {
 	rngQueue, err := fdb.PrefixRange(x.queue.Bytes())
 	if err != nil {
 		return err
 	}
 
-	rngHolder, err := fdb.PrefixRange(x.root.Pack(Tuple{"holder"}))
+	rngRoot, err := fdb.PrefixRange(x.root.Bytes())
 	if err != nil {
 		return err
 	}
@@ -133,14 +117,11 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 
 		kvQueue := iterQueue.MustGet()
 		nextName := string(kvQueue.Value)
+		keyRoot := x.root.Pack(tuple.Tuple{nextName})
 
-		keyIndex := x.index.Pack(Tuple{nextName})
-		keyHolder := x.root.Pack(Tuple{"holder", nextName})
-
-		tr.ClearRange(rngHolder)
-		tr.Set(keyHolder, nil)
+		tr.ClearRange(rngRoot)
+		tr.Set(keyRoot, nil)
 		tr.Clear(kvQueue.Key)
-		tr.Clear(keyIndex)
 		return nil, nil
 	})
 	return err
