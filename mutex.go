@@ -15,15 +15,10 @@ type Mutex struct {
 	queue subspace.Subspace
 }
 
-// NewMutex constructs a distributed mutex. 'path' is the directory path where
-// the mutex state is stored and unqiuely identifies the mutex. 'name' uniquely
+// NewMutex constructs a distributed mutex. 'root' is the directory where the
+// mutex state is stored and unqiuely identifies the mutex. 'name' uniquely
 // identifies the client interacting with the mutex.
-func NewMutex(db fdb.Transactor, path []string, name string) (*Mutex, error) {
-	root, err := directory.Open(db, path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open root dir: %w", err)
-	}
-
+func NewMutex(db fdb.Transactor, root directory.DirectorySubspace, name string) (*Mutex, error) {
 	queue, err := root.Open(db, []string{"queue"}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open queue dir: %w", err)
@@ -80,6 +75,24 @@ func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
 	return o.name, o.hbeat, nil
 }
 
+func (x *Mutex) heartbeat(db fdb.Transactor) error {
+	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
+		name, _, err := x.getOwner(db)
+		if err != nil {
+			return nil, err
+		}
+
+		// If we're not the owner, don't heartbeat.
+		if name != x.name {
+			return nil, nil
+		}
+
+		tr.SetVersionstampedValue(x.root.Pack(tuple.Tuple{x.name}), nil)
+		return nil, nil
+	})
+	return err
+}
+
 // enqueue places the client in the queue for control of the mutex.
 func (x *Mutex) enqueue(db fdb.Transactor) error {
 	rngQueue, err := fdb.PrefixRange(x.queue.Bytes())
@@ -102,7 +115,7 @@ func (x *Mutex) enqueue(db fdb.Transactor) error {
 		if err != nil {
 			return nil, err
 		}
-		tr.Set(fdb.Key(key), []byte(x.name))
+		tr.SetVersionstampedKey(fdb.Key(key), []byte(x.name))
 		return nil, nil
 	})
 	return err
