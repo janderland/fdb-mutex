@@ -1,7 +1,6 @@
 package mutex
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
@@ -22,12 +21,12 @@ type Mutex struct {
 func NewMutex(db fdb.Transactor, path []string, name string) (*Mutex, error) {
 	root, err := directory.Open(db, path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to open root dir", err)
+		return nil, fmt.Errorf("failed to open root dir: %w", err)
 	}
 
 	queue, err := root.Open(db, []string{"queue"}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to open queue dir", err)
+		return nil, fmt.Errorf("failed to open queue dir: %w", err)
 	}
 
 	return &Mutex{
