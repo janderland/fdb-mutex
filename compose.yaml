@@ -1,0 +1,24 @@
+volumes:
+  cache:
+
+services:
+  build:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    depends_on:
+      - fdb
+    working_dir: /src
+    volumes:
+      - .:/src
+      - cache:/cache
+    command: >
+      sh -c './scripts/setup_database.sh && ./scripts/verify_codebase.sh'
+
+  fdb:
+    environment:
+      FDB_NETWORKING_MODE: container
+    image: foundationdb/foundationdb:7.3.43
+    platform: linux/amd64
+
