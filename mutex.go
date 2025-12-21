@@ -193,6 +193,8 @@ func (x *Mutex) packOwnerValue() []byte {
 	// Return a blank parameter for versionstamping
 	// the value. This will result in the value
 	// simply being the 12 byte versionstamp.
+	// See [[fdb.Transaction.SetVersionstampedValue]]
+	// for details.
 	return make([]byte, 16)
 }	
 
