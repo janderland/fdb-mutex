@@ -52,6 +52,7 @@ func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
 	}
 
 	owner, err := db.ReadTransact(func(tr fdb.ReadTransaction) (any, error) {
+		// There should only be 1 owner, so range read that single KV.
 		iter := tr.GetRange(rngRoot, fdb.RangeOptions{Limit: 1}).Iterator()
 		if !iter.Advance() {
 			return Owner{}, nil
@@ -88,7 +89,7 @@ func (x *Mutex) heartbeat(db fdb.Transactor) error {
 		}
 
 		// Update the heartbeat using the current versionstamp.
-		tr.SetVersionstampedValue(x.packRootKey(x.name), make([]byte, 16))
+		tr.SetVersionstampedValue(x.packRootKey(x.name), x.packRootValue())
 		return nil, nil
 	})
 	return err
@@ -116,6 +117,7 @@ func (x *Mutex) enqueue(db fdb.Transactor) error {
 			return nil, fmt.Errorf("failed to pack the queue key: %w", err)
 		}
 
+		// Place ourselves at the end of the queue.
 		tr.SetVersionstampedKey(key, x.packQueueValue())
 		return nil, nil
 	})
@@ -145,8 +147,13 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 		nextName := x.unpackQueueValue(kvQueue.Value)
 		keyRoot := x.packRootKey(nextName)
 
+		// Clear any owner keys.
 		tr.ClearRange(rngRoot)
+
+		// Set the new owner key.
 		tr.Set(keyRoot, nil)
+
+		// Remove the head of the queue.
 		tr.Clear(kvQueue.Key)
 		return nil, nil
 	})
@@ -176,6 +183,13 @@ func (x *Mutex) unpackRootKey(key fdb.Key) (string, error) {
 	}
 	return name, nil
 }
+
+func (x *Mutex) packRootValue() []byte {
+	// Return a blank parameter for versionstamping
+	// the value. This will result in the value
+	// simply being the 12 byte versionstamp.
+	return make([]byte, 16)
+}	
 
 func (x *Mutex) packQueueKey() (fdb.Key, error) {
 	tup := tuple.Tuple{tuple.IncompleteVersionstamp(0)}
