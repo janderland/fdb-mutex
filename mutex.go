@@ -19,7 +19,7 @@ type Mutex struct {
 // mutex state is stored and unqiuely identifies the mutex. 'name' uniquely
 // identifies the client interacting with the mutex.
 func NewMutex(db fdb.Transactor, root directory.DirectorySubspace, name string) (*Mutex, error) {
-	queue, err := root.Open(db, []string{"queue"}, nil)
+	queue, err := root.CreateOrOpen(db, []string{"queue"}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open queue dir: %w", err)
 	}
@@ -54,17 +54,17 @@ func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
 	owner, err := db.ReadTransact(func(tr fdb.ReadTransaction) (any, error) {
 		iter := tr.GetRange(rngRoot, fdb.RangeOptions{Limit: 1}).Iterator()
 		if !iter.Advance() {
-			return nil, nil
+			return Owner{}, nil
 		}
 
 		kv := iter.MustGet()
-		tup, err := tuple.Unpack(kv.Key)
+		name, err := x.unpackRootKey(kv.Key)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to unpack root key: %w", err)
 		}
 
 		return Owner{
-			name:  tup[0].(string),
+			name:  name,
 			hbeat: kv.Value,
 		}, nil
 	})
@@ -87,7 +87,8 @@ func (x *Mutex) heartbeat(db fdb.Transactor) error {
 			return nil, nil
 		}
 
-		tr.SetVersionstampedValue(x.root.Pack(tuple.Tuple{x.name}), nil)
+		// Update the heartbeat using the current versionstamp.
+		tr.SetVersionstampedValue(x.packRootKey(x.name), make([]byte, 16))
 		return nil, nil
 	})
 	return err
@@ -105,17 +106,17 @@ func (x *Mutex) enqueue(db fdb.Transactor) error {
 
 		// If we're already enqueued, skip this operation.
 		for iter.Advance() {
-			if x.name == string(iter.MustGet().Value) {
+			if x.name == x.unpackQueueValue(iter.MustGet().Value) {
 				return nil, nil
 			}
 		}
 
-		tup := tuple.Tuple{tuple.IncompleteVersionstamp(0)}
-		key, err := tup.PackWithVersionstamp(x.queue.Bytes())
+		key, err := x.packQueueKey()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to pack the queue key: %w", err)
 		}
-		tr.SetVersionstampedKey(fdb.Key(key), []byte(x.name))
+
+		tr.SetVersionstampedKey(key, x.packQueueValue())
 		return nil, nil
 	})
 	return err
@@ -141,8 +142,8 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 		}
 
 		kvQueue := iterQueue.MustGet()
-		nextName := string(kvQueue.Value)
-		keyRoot := x.root.Pack(tuple.Tuple{nextName})
+		nextName := x.unpackQueueValue(kvQueue.Value)
+		keyRoot := x.packRootKey(nextName)
 
 		tr.ClearRange(rngRoot)
 		tr.Set(keyRoot, nil)
@@ -150,4 +151,41 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 		return nil, nil
 	})
 	return err
+}
+
+// Some of the methods below don't include
+// much logic. Their primary purpose is to
+// define the KV schema. All keys & values
+// are constructed by calling these methods.
+
+func (x *Mutex) packRootKey(name string) fdb.Key {
+	return x.root.Pack(tuple.Tuple{name})
+}
+
+func (x *Mutex) unpackRootKey(key fdb.Key) (string, error) {
+	tup, err := x.root.Unpack(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to unpack tuple: %w", err)
+	}
+	if len(tup) != 1 {
+		return "", fmt.Errorf("tuple is incorrect length %d", len(tup))
+	}
+	name, ok := tup[0].(string)
+	if !ok {
+		return "", fmt.Errorf("tuple element 1 is not a string")
+	}
+	return name, nil
+}
+
+func (x *Mutex) packQueueKey() (fdb.Key, error) {
+	tup := tuple.Tuple{tuple.IncompleteVersionstamp(0)}
+	return tup.PackWithVersionstamp(x.queue.Bytes())
+}
+
+func (x *Mutex) packQueueValue() []byte {
+	return []byte(x.name)
+}
+
+func (x *Mutex) unpackQueueValue(val []byte) string {
+	return string(val)
 }
