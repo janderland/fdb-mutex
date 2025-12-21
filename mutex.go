@@ -32,15 +32,54 @@ func NewMutex(db fdb.Transactor, root directory.DirectorySubspace, name string) 
 }
 
 func (x *Mutex) TryAcquire(db fdb.Transactor) (bool, error) {
-	panic("not implemented")
+	acquired, err := db.Transact(func(tr fdb.Transaction) (any, error) {
+		owner, _, err := x.getOwner(tr)
+		if err != nil {
+			return nil, err
+		}
+
+		switch owner {
+		case x.name:
+			return true, nil
+
+		case "":
+			// TODO: Start heartbeating.
+			err := x.setOwner(tr, x.name)
+			if err != nil {
+				return nil, err
+			}
+			return true, nil
+
+		default:
+			return false, x.enqueue(db, x.name)
+		}
+	})
+	if err != nil {
+		return false, err
+	}
+	return acquired.(bool), nil
 }
 
 func (x *Mutex) Release(db fdb.Transactor) error {
 	panic("not implemented")
 }
 
-// owner returns the name and heartbeat of the client currently holding the mutex.
-func (x *Mutex) owner(db fdb.Transactor) (string, []byte, error) {
+func (x *Mutex) setOwner(db fdb.Transactor, name string) error {
+	rngOwner, err := x.packOwnerRange()
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Transact(func(tr fdb.Transaction) (any, error) {
+		tr.ClearRange(rngOwner)
+		tr.Set(x.packOwnerKey(name), nil)
+		return nil, nil
+	})
+	return err
+}
+
+// getOwner returns the name and heartbeat of the client currently holding the mutex.
+func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
 	type Owner struct {
 		name  string
 		hbeat []byte
@@ -76,27 +115,31 @@ func (x *Mutex) owner(db fdb.Transactor) (string, []byte, error) {
 	return o.name, o.hbeat, nil
 }
 
-func (x *Mutex) heartbeat(db fdb.Transactor) error {
+func (x *Mutex) heartbeat(db fdb.Transactor, name string) error {
+	if name == "" {
+		return nil
+	}
+
 	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-		name, _, err := x.owner(db)
+		curName, _, err := x.getOwner(db)
 		if err != nil {
 			return nil, err
 		}
 
 		// If we're not the owner, don't heartbeat.
-		if name != x.name {
+		if name != curName {
 			return nil, nil
 		}
 
 		// Update the heartbeat using the current versionstamp.
-		tr.SetVersionstampedValue(x.packOwnerKey(x.name), x.packOwnerValue())
+		tr.SetVersionstampedValue(x.packOwnerKey(name), x.packOwnerValue())
 		return nil, nil
 	})
 	return err
 }
 
 // enqueue places the client in the queue for control of the mutex.
-func (x *Mutex) enqueue(db fdb.Transactor) error {
+func (x *Mutex) enqueue(db fdb.Transactor, name string) error {
 	rngQueue, err := x.packQueueRange()
 	if err != nil {
 		return err
@@ -107,7 +150,7 @@ func (x *Mutex) enqueue(db fdb.Transactor) error {
 
 		// If we're already enqueued, skip this operation.
 		for iter.Advance() {
-			if x.name == x.unpackQueueValue(iter.MustGet().Value) {
+			if name == x.unpackQueueValue(iter.MustGet().Value) {
 				return nil, nil
 			}
 		}
@@ -118,45 +161,33 @@ func (x *Mutex) enqueue(db fdb.Transactor) error {
 		}
 
 		// Place ourselves at the end of the queue.
-		tr.SetVersionstampedKey(key, x.packQueueValue())
+		tr.SetVersionstampedKey(key, x.packQueueValue(name))
 		return nil, nil
 	})
 	return err
 }
 
-// dequeue pops a client off the front of the queue
-// and gives them control of the mutex.
-func (x *Mutex) dequeue(db fdb.Transactor) error {
-	rngOwner, err := x.packOwnerRange()
+// dequeue pops the name off the front of the queue and returns it.
+func (x *Mutex) dequeue(db fdb.Transactor) (string, error) {
+	rng, err := x.packQueueRange()
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	rngQueue, err := x.packQueueRange()
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Transact(func(tr fdb.Transaction) (any, error) {
-		// Clear any owner keys.
-		tr.ClearRange(rngOwner)
-
-		// Check for a new owner at the head of the queue.
-		iterQueue := tr.GetRange(rngQueue, fdb.RangeOptions{Limit: 1}).Iterator()
-		if !iterQueue.Advance() {
-			return nil, nil
+	name, err := db.Transact(func(tr fdb.Transaction) (any, error) {
+		iter := tr.GetRange(rng, fdb.RangeOptions{Limit: 1}).Iterator()
+		if !iter.Advance() {
+			return "", nil
 		}
 
-		kvQueue := iterQueue.MustGet()
-		nextName := x.unpackQueueValue(kvQueue.Value)
-		keyOwner := x.packOwnerKey(nextName)
-
-		// Set the new owner and remove them from the queue.
-		tr.Set(keyOwner, nil)
-		tr.Clear(kvQueue.Key)
-		return nil, nil
+		kv := iter.MustGet()
+		tr.Clear(kv.Key)
+		return x.unpackQueueValue(kv.Value), nil
 	})
-	return err
+	if err != nil {
+		return "", err
+	}
+	return name.(string), nil
 }
 
 // Some of the methods below don't include
@@ -206,8 +237,8 @@ func (x *Mutex) packQueueKey() (fdb.Key, error) {
 	return tup.PackWithVersionstamp(x.queue.Bytes())
 }
 
-func (x *Mutex) packQueueValue() []byte {
-	return []byte(x.name)
+func (x *Mutex) packQueueValue(name string) []byte {
+	return []byte(name)
 }
 
 func (x *Mutex) unpackQueueValue(val []byte) string {
