@@ -39,8 +39,8 @@ func (x *Mutex) Release(db fdb.Transactor) error {
 	panic("not implemented")
 }
 
-// getOwner returns the name and heartbeat of the client currently holding the mutex.
-func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
+// owner returns the name and heartbeat of the client currently holding the mutex.
+func (x *Mutex) owner(db fdb.Transactor) (string, []byte, error) {
 	type Owner struct {
 		name  string
 		hbeat []byte
@@ -78,7 +78,7 @@ func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
 
 func (x *Mutex) heartbeat(db fdb.Transactor) error {
 	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-		name, _, err := x.getOwner(db)
+		name, _, err := x.owner(db)
 		if err != nil {
 			return nil, err
 		}
