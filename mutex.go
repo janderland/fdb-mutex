@@ -46,7 +46,7 @@ func (x *Mutex) owner(db fdb.Transactor) (string, []byte, error) {
 		hbeat []byte
 	}
 
-	rngRoot, err := fdb.PrefixRange(x.root.Bytes())
+	rngRoot, err := x.packOwnerRange()
 	if err != nil {
 		return "", nil, err
 	}
@@ -59,7 +59,7 @@ func (x *Mutex) owner(db fdb.Transactor) (string, []byte, error) {
 		}
 
 		kv := iter.MustGet()
-		name, err := x.unpackRootKey(kv.Key)
+		name, err := x.unpackOwnerKey(kv.Key)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unpack root key: %w", err)
 		}
@@ -89,7 +89,7 @@ func (x *Mutex) heartbeat(db fdb.Transactor) error {
 		}
 
 		// Update the heartbeat using the current versionstamp.
-		tr.SetVersionstampedValue(x.packRootKey(x.name), x.packRootValue())
+		tr.SetVersionstampedValue(x.packOwnerKey(x.name), x.packOwnerValue())
 		return nil, nil
 	})
 	return err
@@ -97,7 +97,7 @@ func (x *Mutex) heartbeat(db fdb.Transactor) error {
 
 // enqueue places the client in the queue for control of the mutex.
 func (x *Mutex) enqueue(db fdb.Transactor) error {
-	rngQueue, err := fdb.PrefixRange(x.queue.Bytes())
+	rngQueue, err := x.packQueueRange()
 	if err != nil {
 		return err
 	}
@@ -127,12 +127,12 @@ func (x *Mutex) enqueue(db fdb.Transactor) error {
 // dequeue pops a client off the front of the queue
 // and gives them control of the mutex.
 func (x *Mutex) dequeue(db fdb.Transactor) error {
-	rngQueue, err := fdb.PrefixRange(x.queue.Bytes())
+	rngOwner, err := x.packOwnerRange()
 	if err != nil {
 		return err
 	}
 
-	rngRoot, err := fdb.PrefixRange(x.root.Bytes())
+	rngQueue, err := x.packQueueRange()
 	if err != nil {
 		return err
 	}
@@ -145,13 +145,13 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 
 		kvQueue := iterQueue.MustGet()
 		nextName := x.unpackQueueValue(kvQueue.Value)
-		keyRoot := x.packRootKey(nextName)
+		keyOwner := x.packOwnerKey(nextName)
 
 		// Clear any owner keys.
-		tr.ClearRange(rngRoot)
+		tr.ClearRange(rngOwner)
 
 		// Set the new owner key.
-		tr.Set(keyRoot, nil)
+		tr.Set(keyOwner, nil)
 
 		// Remove the head of the queue.
 		tr.Clear(kvQueue.Key)
@@ -165,11 +165,15 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 // define the KV schema. All keys & values
 // are constructed by calling these methods.
 
-func (x *Mutex) packRootKey(name string) fdb.Key {
+func (x *Mutex) packOwnerRange() (fdb.KeyRange, error) {
+	return fdb.PrefixRange(x.root.Bytes())
+}
+
+func (x *Mutex) packOwnerKey(name string) fdb.Key {
 	return x.root.Pack(tuple.Tuple{name})
 }
 
-func (x *Mutex) unpackRootKey(key fdb.Key) (string, error) {
+func (x *Mutex) unpackOwnerKey(key fdb.Key) (string, error) {
 	tup, err := x.root.Unpack(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to unpack tuple: %w", err)
@@ -184,12 +188,16 @@ func (x *Mutex) unpackRootKey(key fdb.Key) (string, error) {
 	return name, nil
 }
 
-func (x *Mutex) packRootValue() []byte {
+func (x *Mutex) packOwnerValue() []byte {
 	// Return a blank parameter for versionstamping
 	// the value. This will result in the value
 	// simply being the 12 byte versionstamp.
 	return make([]byte, 16)
 }	
+
+func (x *Mutex) packQueueRange() (fdb.KeyRange, error) {
+	return fdb.PrefixRange(x.queue.Bytes())
+}
 
 func (x *Mutex) packQueueKey() (fdb.Key, error) {
 	tup := tuple.Tuple{tuple.IncompleteVersionstamp(0)}

@@ -18,7 +18,7 @@ func TestPrivateMethods(t *testing.T) {
 		err = x.dequeue(db)
 		require.NoError(t, err)
 
-		name, hbeat, err := x.getOwner(db)
+		name, hbeat, err := x.owner(db)
 		require.NoError(t, err)
 		require.Zero(t, name)
 		require.Empty(t, hbeat)
@@ -29,7 +29,7 @@ func TestPrivateMethods(t *testing.T) {
 		err = x.dequeue(db)
 		require.NoError(t, err)
 
-		name, hbeat, err = x.getOwner(db)
+		name, hbeat, err = x.owner(db)
 		require.NoError(t, err)
 		require.Equal(t, name, "client")
 		require.Empty(t, hbeat)
@@ -37,7 +37,7 @@ func TestPrivateMethods(t *testing.T) {
 		err = x.heartbeat(db)
 		require.NoError(t, err)
 
-		name, hbeat, err = x.getOwner(db)
+		name, hbeat, err = x.owner(db)
 		require.NoError(t, err)
 		require.Equal(t, name, "client")
 		require.NotEmpty(t, hbeat)
