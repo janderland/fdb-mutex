@@ -2,6 +2,7 @@ package mutex
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
@@ -13,6 +14,7 @@ type Mutex struct {
 	name  string
 	root  subspace.Subspace
 	queue subspace.Subspace
+	done  chan struct{}
 }
 
 // NewMutex constructs a distributed mutex. 'root' is the directory where the
@@ -28,10 +30,11 @@ func NewMutex(db fdb.Transactor, root directory.DirectorySubspace, name string) 
 		name:  name,
 		root:  root,
 		queue: queue,
+		done:  make(chan struct{}, 1),
 	}, nil
 }
 
-func (x *Mutex) TryAcquire(db fdb.Transactor) (bool, error) {
+func (x *Mutex) TryAcquire(db fdb.Database) (bool, error) {
 	acquired, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		owner, _, err := x.getOwner(tr)
 		if err != nil {
@@ -43,7 +46,6 @@ func (x *Mutex) TryAcquire(db fdb.Transactor) (bool, error) {
 			return true, nil
 
 		case "":
-			// TODO: Start heartbeating.
 			err := x.setOwner(tr, x.name)
 			if err != nil {
 				return nil, err
@@ -57,11 +59,57 @@ func (x *Mutex) TryAcquire(db fdb.Transactor) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return acquired.(bool), nil
+
+	if acquired.(bool) {
+		x.startBeating(db)
+		return true, nil
+	}
+	return false, nil
 }
 
 func (x *Mutex) Release(db fdb.Transactor) error {
-	panic("not implemented")
+	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
+		name, _, err := x.getOwner(tr)
+		if err != nil {
+			return nil, err
+		}
+
+		if x.name != name {
+			return nil, nil
+		}
+
+		name, err = x.dequeue(tr)
+		if err != nil {
+			return nil, err
+		}
+
+		return nil, x.setOwner(tr, name)
+	})
+	if err != nil {
+		return err
+	}
+
+	x.stopBeating()
+	return nil
+}
+
+func (x *Mutex) startBeating(db fdb.Database) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <- x.done:
+			return
+
+		case <- ticker.C:
+			_ = x.heartbeat(db, x.name)
+		}
+	}
+}
+
+func (x *Mutex) stopBeating() {
+	x.done <- struct{}{}
 }
 
 func (x *Mutex) setOwner(db fdb.Transactor, name string) error {
@@ -226,7 +274,7 @@ func (x *Mutex) packOwnerValue() []byte {
 	// See [[fdb.Transaction.SetVersionstampedValue]]
 	// for details.
 	return make([]byte, 16)
-}	
+}
 
 func (x *Mutex) packQueueRange() (fdb.KeyRange, error) {
 	return fdb.PrefixRange(x.queue.Bytes())
