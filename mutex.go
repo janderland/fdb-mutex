@@ -138,6 +138,10 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 	}
 
 	_, err = db.Transact(func(tr fdb.Transaction) (any, error) {
+		// Clear any owner keys.
+		tr.ClearRange(rngOwner)
+
+		// Check for a new owner at the head of the queue.
 		iterQueue := tr.GetRange(rngQueue, fdb.RangeOptions{Limit: 1}).Iterator()
 		if !iterQueue.Advance() {
 			return nil, nil
@@ -147,13 +151,8 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 		nextName := x.unpackQueueValue(kvQueue.Value)
 		keyOwner := x.packOwnerKey(nextName)
 
-		// Clear any owner keys.
-		tr.ClearRange(rngOwner)
-
-		// Set the new owner key.
+		// Set the new owner and remove them from the queue.
 		tr.Set(keyOwner, nil)
-
-		// Remove the head of the queue.
 		tr.Clear(kvQueue.Key)
 		return nil, nil
 	})

@@ -11,40 +11,96 @@ import (
 )
 
 func TestPrivateMethods(t *testing.T) {
-	runTest(t, func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
-		x, err := NewMutex(db, root, "client")
-		require.NoError(t, err)
+	tests := map[string]testFn{
+		"empty": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
+			x, err := NewMutex(db, root, "client")
+			require.NoError(t, err)
 
-		err = x.dequeue(db)
-		require.NoError(t, err)
+			err = x.dequeue(db)
+			require.NoError(t, err)
 
-		name, hbeat, err := x.owner(db)
-		require.NoError(t, err)
-		require.Zero(t, name)
-		require.Empty(t, hbeat)
+			err = x.heartbeat(db)
+			require.NoError(t, err)
 
-		err = x.enqueue(db)
-		require.NoError(t, err)
+			name, hbeat, err := x.owner(db)
+			require.NoError(t, err)
+			require.Equal(t, name, "")
+			require.Empty(t, hbeat)
+		},
+		"locked": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
+			x, err := NewMutex(db, root, "client")
+			require.NoError(t, err)
 
-		err = x.dequeue(db)
-		require.NoError(t, err)
+			err = x.enqueue(db)
+			require.NoError(t, err)
 
-		name, hbeat, err = x.owner(db)
-		require.NoError(t, err)
-		require.Equal(t, name, "client")
-		require.Empty(t, hbeat)
+			err = x.dequeue(db)
+			require.NoError(t, err)
 
-		err = x.heartbeat(db)
-		require.NoError(t, err)
+			name, hbeat, err := x.owner(db)
+			require.NoError(t, err)
+			require.Equal(t, name, "client")
+			require.Empty(t, hbeat)
+		},
+		"heartbeat": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
+			x, err := NewMutex(db, root, "client")
+			require.NoError(t, err)
 
-		name, hbeat, err = x.owner(db)
-		require.NoError(t, err)
-		require.Equal(t, name, "client")
-		require.NotEmpty(t, hbeat)
-	})
+			err = x.enqueue(db)
+			require.NoError(t, err)
+
+			err = x.dequeue(db)
+			require.NoError(t, err)
+
+			err = x.heartbeat(db)
+			require.NoError(t, err)
+
+			name, hbeat, err := x.owner(db)
+			require.NoError(t, err)
+			require.Equal(t, name, "client")
+			require.NotEmpty(t, hbeat)
+		},
+		"non-owner heartbeat": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
+			x1, err := NewMutex(db, root, "client1")
+			require.NoError(t, err)
+
+			x2, err := NewMutex(db, root, "client2")
+			require.NoError(t, err)
+
+			err = x1.enqueue(db)
+			require.NoError(t, err)
+
+			err = x2.enqueue(db)
+			require.NoError(t, err)
+
+			err = x1.dequeue(db)
+			require.NoError(t, err)
+
+			err = x2.heartbeat(db)
+			require.NoError(t, err)
+
+			name, hbeat, err := x1.owner(db)
+			require.NoError(t, err)
+			require.Equal(t, name, "client1")
+			require.Empty(t, hbeat)
+		},
+	}
+
+	runTests(t, tests)
 }
 
-func runTest(t *testing.T, fn func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace)) {
+type testFn func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace)
+
+func runTests(t *testing.T, tests map[string]testFn) {
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runTest(t, test)
+		})
+	}
+}
+
+func runTest(t *testing.T, test testFn) {
 	fdb.MustAPIVersion(730)
 	db := fdb.MustOpenDefault()
 
@@ -66,5 +122,5 @@ func runTest(t *testing.T, fn func(t *testing.T, db fdb.Transactor, root directo
 		}
 	}()
 
-	fn(t, db, root)
+	test(t, db, root)
 }
