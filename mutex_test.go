@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLowLevel(t *testing.T) {
+func TestPrivateMethods(t *testing.T) {
 	runTest(t, func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
 		x, err := NewMutex(db, root, "client")
 		require.NoError(t, err)
