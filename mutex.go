@@ -162,8 +162,9 @@ func (x *Mutex) dequeue(db fdb.Transactor) error {
 
 // Some of the methods below don't include
 // much logic. Their primary purpose is to
-// define the KV schema. All keys & values
-// are constructed by calling these methods.
+// define the KV schema. All prefixes, keys,
+// and values are constructed by calling
+// these methods.
 
 func (x *Mutex) packOwnerRange() (fdb.KeyRange, error) {
 	return fdb.PrefixRange(x.root.Bytes())
