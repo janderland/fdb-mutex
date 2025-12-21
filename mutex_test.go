@@ -73,13 +73,13 @@ func TestPrivateMethods(t *testing.T) {
 			err = x2.enqueue(db)
 			require.NoError(t, err)
 
-			err = x1.dequeue(db)
+			err = x2.dequeue(db)
 			require.NoError(t, err)
 
 			err = x2.heartbeat(db)
 			require.NoError(t, err)
 
-			name, hbeat, err := x1.owner(db)
+			name, hbeat, err := x2.owner(db)
 			require.NoError(t, err)
 			require.Equal(t, name, "client1")
 			require.Empty(t, hbeat)
