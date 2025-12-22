@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
@@ -13,25 +12,18 @@ import (
 type Mutex struct {
 	name  string
 	root  subspace.Subspace
-	queue subspace.Subspace
 	done  chan struct{}
 }
 
 // NewMutex constructs a distributed mutex. 'root' is the directory where the
 // mutex state is stored and unqiuely identifies the mutex. 'name' uniquely
 // identifies the client interacting with the mutex.
-func NewMutex(db fdb.Transactor, root directory.DirectorySubspace, name string) (*Mutex, error) {
-	queue, err := root.CreateOrOpen(db, []string{"queue"}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open queue dir: %w", err)
-	}
-
-	return &Mutex{
+func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) Mutex {
+	return Mutex{
 		name:  name,
 		root:  root,
-		queue: queue,
 		done:  make(chan struct{}, 1),
-	}, nil
+	}
 }
 
 func (x *Mutex) TryAcquire(db fdb.Database) (bool, error) {
@@ -247,11 +239,11 @@ func (x *Mutex) dequeue(db fdb.Transactor) (string, error) {
 // these methods.
 
 func (x *Mutex) packOwnerRange() (fdb.KeyRange, error) {
-	return fdb.PrefixRange(x.root.Bytes())
+	return fdb.PrefixRange(x.root.Pack(tuple.Tuple{"owner"}))
 }
 
 func (x *Mutex) packOwnerKey(name string) fdb.Key {
-	return x.root.Pack(tuple.Tuple{name})
+	return x.root.Pack(tuple.Tuple{"owner", name})
 }
 
 func (x *Mutex) unpackOwnerKey(key fdb.Key) (string, error) {
@@ -259,10 +251,12 @@ func (x *Mutex) unpackOwnerKey(key fdb.Key) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to unpack tuple: %w", err)
 	}
-	if len(tup) != 1 {
+	if len(tup) != 2 {
 		return "", fmt.Errorf("tuple is incorrect length %d", len(tup))
 	}
-	name, ok := tup[0].(string)
+	// The 1st element should be the string "owner". We won't
+	// bother confirming that. The 2nd is the name of the owner.
+	name, ok := tup[1].(string)
 	if !ok {
 		return "", fmt.Errorf("tuple element 1 is not a string")
 	}
@@ -279,12 +273,12 @@ func (x *Mutex) packOwnerValue() []byte {
 }
 
 func (x *Mutex) packQueueRange() (fdb.KeyRange, error) {
-	return fdb.PrefixRange(x.queue.Bytes())
+	return fdb.PrefixRange(x.root.Pack(tuple.Tuple{"queue"}))
 }
 
 func (x *Mutex) packQueueKey() (fdb.Key, error) {
-	tup := tuple.Tuple{tuple.IncompleteVersionstamp(0)}
-	return tup.PackWithVersionstamp(x.queue.Bytes())
+	tup := tuple.Tuple{"queue", tuple.IncompleteVersionstamp(0)}
+	return tup.PackWithVersionstamp(x.root.Bytes())
 }
 
 func (x *Mutex) packQueueValue(name string) []byte {

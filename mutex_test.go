@@ -7,14 +7,14 @@ import (
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPrivateMethods(t *testing.T) {
 	tests := map[string]testFn{
-		"empty": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
-			x, err := NewMutex(db, root, "")
-			require.NoError(t, err)
+		"empty": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
 
 			name, err := x.dequeue(db)
 			require.NoError(t, err)
@@ -28,11 +28,10 @@ func TestPrivateMethods(t *testing.T) {
 			require.Equal(t, "", name)
 			require.Empty(t, hbeat)
 		},
-		"queue": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
-			x, err := NewMutex(db, root, "")
-			require.NoError(t, err)
+		"queue": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
 
-			err = x.enqueue(db, "clientZ")
+			err := x.enqueue(db, "clientZ")
 			require.NoError(t, err)
 
 			err = x.enqueue(db, "clientA")
@@ -42,11 +41,10 @@ func TestPrivateMethods(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "clientZ", name)
 		},
-		"owner": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
-			x, err := NewMutex(db, root, "")
-			require.NoError(t, err)
+		"owner": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
 
-			err = x.setOwner(db, "client")
+			err := x.setOwner(db, "client")
 			require.NoError(t, err)
 
 			name, hbeat, err := x.getOwner(db)
@@ -54,11 +52,10 @@ func TestPrivateMethods(t *testing.T) {
 			require.Equal(t, "client", name)
 			require.Empty(t, hbeat)
 		},
-		"heartbeat": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
-			x, err := NewMutex(db, root, "")
-			require.NoError(t, err)
+		"heartbeat": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
 
-			err = x.setOwner(db, "client")
+			err := x.setOwner(db, "client")
 			require.NoError(t, err)
 
 			err = x.heartbeat(db, "client")
@@ -68,11 +65,10 @@ func TestPrivateMethods(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, hbeat)
 		},
-		"non-owner heartbeat": func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace) {
-			x, err := NewMutex(db, root, "")
-			require.NoError(t, err)
+		"non-owner heartbeat": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
 
-			err = x.setOwner(db, "clientA")
+			err := x.setOwner(db, "clientA")
 			require.NoError(t, err)
 
 			err = x.heartbeat(db, "clientZ")
@@ -87,7 +83,7 @@ func TestPrivateMethods(t *testing.T) {
 	runTests(t, tests)
 }
 
-type testFn func(t *testing.T, db fdb.Transactor, root directory.DirectorySubspace)
+type testFn func(t *testing.T, db fdb.Transactor, root subspace.Subspace)
 
 func runTests(t *testing.T, tests map[string]testFn) {
 	for name, test := range tests {
