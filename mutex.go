@@ -1,6 +1,8 @@
 package mutex
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -17,8 +19,17 @@ type Mutex struct {
 
 // NewMutex constructs a distributed mutex. 'root' is the directory where the
 // mutex state is stored and unqiuely identifies the mutex. 'name' uniquely
-// identifies the client interacting with the mutex.
+// identifies the client interacting with the mutex. If name is left blank
+// then a random name is chosen.
 func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) Mutex {
+	if name == "" {
+		var randBytes [32]byte
+		if _, err := rand.Read(randBytes[:]); err != nil {
+			panic(fmt.Errorf("failed to generate a random name: %w", err))
+		}
+		name = hex.EncodeToString(randBytes[:])
+	}
+
 	return Mutex{
 		name:  name,
 		root:  root,
