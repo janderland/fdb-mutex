@@ -1,6 +1,8 @@
 package mutex
 
 import (
+	// "bytes"
+	// "context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -12,9 +14,9 @@ import (
 )
 
 type Mutex struct {
-	name  string
-	root  subspace.Subspace
-	done  chan struct{}
+	kv
+	name string
+	done chan struct{}
 }
 
 // NewMutex constructs a distributed mutex. 'root' is the directory where the
@@ -31,20 +33,95 @@ func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) Mutex {
 	}
 
 	return Mutex{
-		name:  name,
-		root:  root,
-		done:  make(chan struct{}, 1),
+		kv:   kv{root},
+		name: name,
+		done: make(chan struct{}, 1),
 	}
 }
 
+/*
+// AutoRelease runs a loop that checks if the current owner's latest heartbeat is older than the specified duration.
+// If so, the owner is assumed to have died and the mutex is released. Multiple instances of this function may be run.
+func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, maxAge time.Duration) error {
+	kv := kv{root}
+
+	// Initial setup for watch and timer. These two
+	// will be reinitialized at the end of each loop.
+	//
+	// NOTE: We cannot defer a call to cancel because
+	// the variable is reassigned at the end of each
+	// loop. We need the latest assigned value to be
+	// called before we leave the function, so we must
+	// manually call it at every return point.
+	childCtx, cancel := context.WithCancel(ctx)
+	watch := kv.watchOwner(childCtx, db)
+	timer := time.NewTimer(maxAge)
+
+	var (
+		tstamp time.Time
+		hbeat  [12]byte
+		name   string
+	)
+
+	for {
+		// Wait for the watch or timer to fire.
+		select {
+		case err := <-watch:
+			if err != nil {
+				cancel()
+				return fmt.Errorf("failed to wait on watch", err)
+			}
+
+		case <-timer.C:
+		}
+
+		// Check the age of the heartbeat and release the mutex if necessary.
+		_, err := db.Transact(func(t fdb.Transaction) (interface{}, error) {
+			curName, curHbeat, err := kv.getOwner(db)
+			if err != nil {
+				return nil, err
+			}
+
+			if name != curName {
+				name = curName
+				copy(hbeat[:], curHbeat)
+				tstamp = time.Now()
+				return nil, nil
+			}
+
+			if bytes.Compare(hbeat[:], curHbeat) != 0 {
+				copy(hbeat[:], curHbeat)
+				tstamp = time.Now()
+				return nil, nil
+			}
+
+			if dur := time.Now().Sub(tstamp); dur > maxAge {
+
+			}
+			return nil, nil
+		})
+		if err != nil {
+			cancel()
+			return fmt.Errorf("failed to handle watch trigger: %w", err)
+		}
+
+		// Reset the watch and timer.
+		cancel()
+		childCtx, cancel = context.WithCancel(ctx)
+		watch = kv.watchOwner(childCtx, db)
+		_ = timer.Reset(maxAge)
+	}
+}
+*/
+
 func (x *Mutex) TryAcquire(db fdb.Database) (bool, error) {
 	acquired, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-		owner, _, err := x.getOwner(tr)
+		owner, err := x.getOwner(tr)
 		if err != nil {
 			return nil, err
 		}
 
-		switch owner {
+		switch owner.name {
 		case x.name:
 			return true, nil
 
@@ -72,16 +149,16 @@ func (x *Mutex) TryAcquire(db fdb.Database) (bool, error) {
 
 func (x *Mutex) Release(db fdb.Transactor) error {
 	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-		name, _, err := x.getOwner(tr)
+		owner, err := x.getOwner(tr)
 		if err != nil {
 			return nil, err
 		}
 
-		if x.name != name {
+		if x.name != owner.name {
 			return nil, nil
 		}
 
-		name, err = x.dequeue(tr)
+		name, err := x.dequeue(tr)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +194,9 @@ func (x *Mutex) stopBeating() {
 	x.done <- struct{}{}
 }
 
-func (x *Mutex) setOwner(db fdb.Transactor, name string) error {
+type kv struct{ subspace.Subspace }
+
+func (x *kv) setOwner(db fdb.Transactor, name string) error {
 	rngOwner, err := x.packOwnerRange()
 	if err != nil {
 		return err
@@ -131,23 +210,23 @@ func (x *Mutex) setOwner(db fdb.Transactor, name string) error {
 	return err
 }
 
-// getOwner returns the name and heartbeat of the client currently holding the mutex.
-func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
-	type Owner struct {
-		name  string
-		hbeat []byte
-	}
+type ownerHeartbeat struct {
+	name  string
+	hbeat []byte
+}
 
+// getOwner returns the name and heartbeat of the client currently holding the mutex.
+func (x *kv) getOwner(db fdb.Transactor) (ownerHeartbeat, error) {
 	rngRoot, err := x.packOwnerRange()
 	if err != nil {
-		return "", nil, err
+		return ownerHeartbeat{}, err
 	}
 
 	owner, err := db.ReadTransact(func(tr fdb.ReadTransaction) (any, error) {
 		// There should only be 1 owner, so range read that single KV.
 		iter := tr.GetRange(rngRoot, fdb.RangeOptions{Limit: 1}).Iterator()
 		if !iter.Advance() {
-			return Owner{}, nil
+			return ownerHeartbeat{}, nil
 		}
 
 		kv := iter.MustGet()
@@ -156,31 +235,61 @@ func (x *Mutex) getOwner(db fdb.Transactor) (string, []byte, error) {
 			return nil, fmt.Errorf("failed to unpack root key: %w", err)
 		}
 
-		return Owner{
+		return ownerHeartbeat{
 			name:  name,
 			hbeat: kv.Value,
 		}, nil
 	})
 	if err != nil {
-		return "", nil, err
+		return ownerHeartbeat{}, err
 	}
-	o := owner.(Owner)
-	return o.name, o.hbeat, nil
+	return owner.(ownerHeartbeat), nil
 }
 
-func (x *Mutex) heartbeat(db fdb.Transactor, name string) error {
+/*
+func (x *kv) watchOwner(ctx context.Context, db fdb.Transactor) <-chan error {
+	ch := make(chan error, 1)
+
+	ret, err := db.Transact(func(tr fdb.Transaction) (any, error) {
+		owner, err := x.getOwner(tr)
+		if err != nil {
+			return nil, err
+		}
+		return tr.Watch(x.packOwnerKey(owner.name)), nil
+	})
+	if err != nil {
+		ch <- err
+		return ch
+	}
+
+	watch := ret.(fdb.FutureNil)
+
+	go func() {
+		<-ctx.Done()
+		watch.Cancel()
+	}()
+
+	go func() {
+		ch <- watch.Get()
+	}()
+
+	return ch
+}
+*/
+
+func (x *kv) heartbeat(db fdb.Transactor, name string) error {
 	if name == "" {
 		return nil
 	}
 
 	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-		curName, _, err := x.getOwner(db)
+		owner, err := x.getOwner(db)
 		if err != nil {
 			return nil, err
 		}
 
 		// If we're not the owner, don't heartbeat.
-		if name != curName {
+		if name != owner.name {
 			return nil, nil
 		}
 
@@ -192,7 +301,7 @@ func (x *Mutex) heartbeat(db fdb.Transactor, name string) error {
 }
 
 // enqueue places the client in the queue for control of the mutex.
-func (x *Mutex) enqueue(db fdb.Transactor, name string) error {
+func (x *kv) enqueue(db fdb.Transactor, name string) error {
 	rngQueue, err := x.packQueueRange()
 	if err != nil {
 		return err
@@ -221,7 +330,7 @@ func (x *Mutex) enqueue(db fdb.Transactor, name string) error {
 }
 
 // dequeue pops the name off the front of the queue and returns it.
-func (x *Mutex) dequeue(db fdb.Transactor) (string, error) {
+func (x *kv) dequeue(db fdb.Transactor) (string, error) {
 	rng, err := x.packQueueRange()
 	if err != nil {
 		return "", err
@@ -243,22 +352,20 @@ func (x *Mutex) dequeue(db fdb.Transactor) (string, error) {
 	return name.(string), nil
 }
 
-// Some of the methods below don't include
-// much logic. Their primary purpose is to
-// define the KV schema. All prefixes, keys,
-// and values are constructed by calling
-// these methods.
+// Some of the methods below don't include much logic. Their primary
+// purpose is to define the KV schema. All prefixes, keys, and values
+// are constructed by calling these methods.
 
-func (x *Mutex) packOwnerRange() (fdb.KeyRange, error) {
-	return fdb.PrefixRange(x.root.Pack(tuple.Tuple{"owner"}))
+func (x *kv) packOwnerRange() (fdb.KeyRange, error) {
+	return fdb.PrefixRange(x.Pack(tuple.Tuple{"owner"}))
 }
 
-func (x *Mutex) packOwnerKey(name string) fdb.Key {
-	return x.root.Pack(tuple.Tuple{"owner", name})
+func (x *kv) packOwnerKey(name string) fdb.Key {
+	return x.Pack(tuple.Tuple{"owner", name})
 }
 
-func (x *Mutex) unpackOwnerKey(key fdb.Key) (string, error) {
-	tup, err := x.root.Unpack(key)
+func (x *kv) unpackOwnerKey(key fdb.Key) (string, error) {
+	tup, err := x.Unpack(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to unpack tuple: %w", err)
 	}
@@ -274,7 +381,7 @@ func (x *Mutex) unpackOwnerKey(key fdb.Key) (string, error) {
 	return name, nil
 }
 
-func (x *Mutex) packOwnerValue() []byte {
+func (x *kv) packOwnerValue() []byte {
 	// Return a blank parameter for versionstamping
 	// the value. This will result in the value
 	// simply being the 12 byte versionstamp.
@@ -283,19 +390,19 @@ func (x *Mutex) packOwnerValue() []byte {
 	return make([]byte, 16)
 }
 
-func (x *Mutex) packQueueRange() (fdb.KeyRange, error) {
-	return fdb.PrefixRange(x.root.Pack(tuple.Tuple{"queue"}))
+func (x *kv) packQueueRange() (fdb.KeyRange, error) {
+	return fdb.PrefixRange(x.Pack(tuple.Tuple{"queue"}))
 }
 
-func (x *Mutex) packQueueKey() (fdb.Key, error) {
+func (x *kv) packQueueKey() (fdb.Key, error) {
 	tup := tuple.Tuple{"queue", tuple.IncompleteVersionstamp(0)}
-	return tup.PackWithVersionstamp(x.root.Bytes())
+	return tup.PackWithVersionstamp(x.Bytes())
 }
 
-func (x *Mutex) packQueueValue(name string) []byte {
+func (x *kv) packQueueValue(name string) []byte {
 	return []byte(name)
 }
 
-func (x *Mutex) unpackQueueValue(val []byte) string {
+func (x *kv) unpackQueueValue(val []byte) string {
 	return string(val)
 }

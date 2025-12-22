@@ -24,10 +24,10 @@ func TestPrivateMethods(t *testing.T) {
 			err = x.heartbeat(db, "")
 			require.NoError(t, err)
 
-			name, hbeat, err := x.getOwner(db)
+			owner, err := x.getOwner(db)
 			require.NoError(t, err)
-			require.Equal(t, "", name)
-			require.Empty(t, hbeat)
+			require.Equal(t, "", owner.name)
+			require.Empty(t, owner.hbeat)
 		},
 		"queue": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
@@ -48,10 +48,10 @@ func TestPrivateMethods(t *testing.T) {
 			err := x.setOwner(db, "client")
 			require.NoError(t, err)
 
-			name, hbeat, err := x.getOwner(db)
+			owner, err := x.getOwner(db)
 			require.NoError(t, err)
-			require.Equal(t, "client", name)
-			require.Empty(t, hbeat)
+			require.Equal(t, "client", owner.name)
+			require.Empty(t, owner.hbeat)
 		},
 		"heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
@@ -62,9 +62,9 @@ func TestPrivateMethods(t *testing.T) {
 			err = x.heartbeat(db, "client")
 			require.NoError(t, err)
 
-			_, hbeat, err := x.getOwner(db)
+			owner, err := x.getOwner(db)
 			require.NoError(t, err)
-			require.NotEmpty(t, hbeat)
+			require.NotEmpty(t, owner.hbeat)
 		},
 		"non-owner heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
@@ -75,9 +75,9 @@ func TestPrivateMethods(t *testing.T) {
 			err = x.heartbeat(db, "clientZ")
 			require.NoError(t, err)
 
-			_, hbeat, err := x.getOwner(db)
+			owner, err := x.getOwner(db)
 			require.NoError(t, err)
-			require.Empty(t, hbeat)
+			require.Empty(t, owner.hbeat)
 		},
 	}
 
@@ -114,9 +114,9 @@ func TestTryAcquire(t *testing.T) {
 			// Wait for goroutine to update heartbeat.
 			time.Sleep(1500 * time.Millisecond)
 
-			_, hbeat, err := x.getOwner(db)
+			owner, err := x.getOwner(db)
 			require.NoError(t, err)
-			require.NotEmpty(t, hbeat)
+			require.NotEmpty(t, owner.hbeat)
 		},
 	}
 
