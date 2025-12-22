@@ -13,7 +13,7 @@ import (
 
 func TestPrivateMethods(t *testing.T) {
 	tests := map[string]testFn{
-		"empty": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+		"empty": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
 
 			name, err := x.dequeue(db)
@@ -28,7 +28,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.Equal(t, "", name)
 			require.Empty(t, hbeat)
 		},
-		"queue": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+		"queue": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
 
 			err := x.enqueue(db, "clientZ")
@@ -41,7 +41,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "clientZ", name)
 		},
-		"owner": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+		"owner": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
 
 			err := x.setOwner(db, "client")
@@ -52,7 +52,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.Equal(t, "client", name)
 			require.Empty(t, hbeat)
 		},
-		"heartbeat": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+		"heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
 
 			err := x.setOwner(db, "client")
@@ -65,7 +65,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, hbeat)
 		},
-		"non-owner heartbeat": func(t *testing.T, db fdb.Transactor, root subspace.Subspace) {
+		"non-owner heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := NewMutex(db, root, "")
 
 			err := x.setOwner(db, "clientA")
@@ -83,7 +83,29 @@ func TestPrivateMethods(t *testing.T) {
 	runTests(t, tests)
 }
 
-type testFn func(t *testing.T, db fdb.Transactor, root subspace.Subspace)
+func TestTryAcquire(t *testing.T) {
+	runTest(t, func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+		x1 := NewMutex(db, root, "client1")
+		x2 := NewMutex(db, root, "client2")
+
+		acquired, err := x1.TryAcquire(db)
+		require.NoError(t, err)
+		require.True(t, acquired)
+
+		acquired, err = x2.TryAcquire(db)
+		require.NoError(t, err)
+		require.False(t, acquired)
+
+		err = x1.Release(db)
+		require.NoError(t, err)
+
+		acquired, err = x2.TryAcquire(db)
+		require.NoError(t, err)
+		require.True(t, acquired)
+	})
+}
+
+type testFn func(t *testing.T, db fdb.Database, root subspace.Subspace)
 
 func runTests(t *testing.T, tests map[string]testFn) {
 	for name, test := range tests {
