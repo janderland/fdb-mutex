@@ -2,7 +2,7 @@ package mutex
 
 import (
 	// "bytes"
-	// "context"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -32,8 +32,16 @@ func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) Mutex {
 		name = hex.EncodeToString(randBytes[:])
 	}
 
+	kv := kv{root}
+
+	// Set a blank owner to initialize the owner key.
+	// This allows kv.watchOwner() to trigger on the
+	// first acquire.
+	// TODO: handle the error.
+	_ = kv.setOwner(db, "")
+
 	return Mutex{
-		kv:   kv{root},
+		kv:   kv,
 		name: name,
 		done: make(chan struct{}, 1),
 	}
@@ -246,7 +254,6 @@ func (x *kv) getOwner(db fdb.Transactor) (ownerHeartbeat, error) {
 	return owner.(ownerHeartbeat), nil
 }
 
-/*
 func (x *kv) watchOwner(ctx context.Context, db fdb.Transactor) <-chan error {
 	ch := make(chan error, 1)
 
@@ -275,7 +282,6 @@ func (x *kv) watchOwner(ctx context.Context, db fdb.Transactor) <-chan error {
 
 	return ch
 }
-*/
 
 func (x *kv) heartbeat(db fdb.Transactor, name string) error {
 	if name == "" {

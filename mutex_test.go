@@ -1,6 +1,7 @@
 package mutex
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"testing"
@@ -84,6 +85,51 @@ func TestPrivateMethods(t *testing.T) {
 	runTests(t, tests)
 }
 
+func TestWatchOwner(t *testing.T) {
+	tests := map[string]testFn{
+		"set owner": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			watch := x.watchOwner(ctx, db)
+
+			err := x.setOwner(db, "client")
+			require.NoError(t, err)
+
+			require.NoError(t, <-watch)
+		},
+		"change owner": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			err := x.setOwner(db, "clientA")
+			require.NoError(t, err)
+
+			watch := x.watchOwner(ctx, db)
+
+			err = x.setOwner(db, "clientB")
+			require.NoError(t, err)
+
+			require.NoError(t, <-watch)
+		},
+		"cancel": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
+
+			ctx, cancel := context.WithCancel(context.Background())
+			watch := x.watchOwner(ctx, db)
+
+			cancel()
+			require.Error(t, <-watch)
+		},
+	}
+
+	runTests(t, tests)
+}
+
 func TestTryAcquire(t *testing.T) {
 	tests := map[string]testFn{
 		"locked": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
@@ -111,7 +157,8 @@ func TestTryAcquire(t *testing.T) {
 			_, err := x.TryAcquire(db)
 			require.NoError(t, err)
 
-			// Wait for goroutine to update heartbeat.
+			// Wait more than 1s to ensure the owner
+			// updates it's heartbeat.
 			time.Sleep(1500 * time.Millisecond)
 
 			owner, err := x.getOwner(db)
