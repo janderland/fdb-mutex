@@ -23,7 +23,7 @@ type Mutex struct {
 // mutex state is stored and unqiuely identifies the mutex. 'name' uniquely
 // identifies the client interacting with the mutex. If name is left blank
 // then a random name is chosen.
-func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) Mutex {
+func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) (Mutex, error) {
 	if name == "" {
 		var randBytes [32]byte
 		if _, err := rand.Read(randBytes[:]); err != nil {
@@ -37,14 +37,16 @@ func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) Mutex {
 	// Set a blank owner to initialize the owner key.
 	// This allows kv.watchOwner() to trigger on the
 	// first acquire.
-	// TODO: handle the error.
-	_ = kv.setOwner(db, "")
+	err := kv.setOwner(db, "")
+	if err != nil {
+	  return Mutex{}, fmt.Errorf("failed to initialize owner key: %w", err)
+	}
 
 	return Mutex{
 		kv:   kv,
 		name: name,
-		done: make(chan struct{}, 1),
-	}
+		done: make(chan struct{}),
+	}, nil
 }
 
 /*

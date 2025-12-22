@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPrivateMethods(t *testing.T) {
+func TestKVMethods(t *testing.T) {
 	tests := map[string]testFn{
 		"empty": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+			x := kv{root}
 
 			name, err := x.dequeue(db)
 			require.NoError(t, err)
@@ -31,7 +31,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.Empty(t, owner.hbeat)
 		},
 		"queue": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+			x := kv{root}
 
 			err := x.enqueue(db, "clientZ")
 			require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.Equal(t, "clientZ", name)
 		},
 		"owner": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+			x := kv{root}
 
 			err := x.setOwner(db, "client")
 			require.NoError(t, err)
@@ -55,7 +55,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.Empty(t, owner.hbeat)
 		},
 		"heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+			x := kv{root}
 
 			err := x.setOwner(db, "client")
 			require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestPrivateMethods(t *testing.T) {
 			require.NotEmpty(t, owner.hbeat)
 		},
 		"non-owner heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+			x := kv{root}
 
 			err := x.setOwner(db, "clientA")
 			require.NoError(t, err)
@@ -80,28 +80,8 @@ func TestPrivateMethods(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, owner.hbeat)
 		},
-	}
-
-	runTests(t, tests)
-}
-
-func TestWatchOwner(t *testing.T) {
-	tests := map[string]testFn{
-		"set owner": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			watch := x.watchOwner(ctx, db)
-
-			err := x.setOwner(db, "client")
-			require.NoError(t, err)
-
-			require.NoError(t, <-watch)
-		},
-		"change owner": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+		"watch owner": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x := kv{root}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -116,8 +96,8 @@ func TestWatchOwner(t *testing.T) {
 
 			require.NoError(t, <-watch)
 		},
-		"cancel": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+		"cancel watch": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x := kv{root}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			watch := x.watchOwner(ctx, db)
@@ -133,8 +113,11 @@ func TestWatchOwner(t *testing.T) {
 func TestTryAcquire(t *testing.T) {
 	tests := map[string]testFn{
 		"locked": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x1 := NewMutex(db, root, "")
-			x2 := NewMutex(db, root, "")
+			x1, err := NewMutex(db, root, "")
+			require.NoError(t, err)
+
+			x2, err := NewMutex(db, root, "")
+			require.NoError(t, err)
 
 			acquired, err := x1.TryAcquire(db)
 			require.NoError(t, err)
@@ -152,9 +135,10 @@ func TestTryAcquire(t *testing.T) {
 			require.True(t, acquired)
 		},
 		"heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-			x := NewMutex(db, root, "")
+			x, err := NewMutex(db, root, "")
+			require.NoError(t, err)
 
-			_, err := x.TryAcquire(db)
+			_, err = x.TryAcquire(db)
 			require.NoError(t, err)
 
 			// Wait more than 1s to ensure the owner
