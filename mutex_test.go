@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestKVMethods(t *testing.T) {
+func TestKV(t *testing.T) {
 	tests := map[string]testFn{
 		"empty": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x := kv{root}
