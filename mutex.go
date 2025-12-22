@@ -94,18 +94,20 @@ func (x *Mutex) Release(db fdb.Transactor) error {
 }
 
 func (x *Mutex) startBeating(db fdb.Database) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
 
-	for {
-		select {
-		case <- x.done:
-			return
+		for {
+			select {
+			case <-x.done:
+				return
 
-		case <- ticker.C:
-			_ = x.heartbeat(db, x.name)
+			case <-ticker.C:
+				_ = x.heartbeat(db, x.name)
+			}
 		}
-	}
+	}()
 }
 
 func (x *Mutex) stopBeating() {
