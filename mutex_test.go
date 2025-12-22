@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"testing"
+	"time"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
@@ -84,25 +85,42 @@ func TestPrivateMethods(t *testing.T) {
 }
 
 func TestTryAcquire(t *testing.T) {
-	runTest(t, func(t *testing.T, db fdb.Database, root subspace.Subspace) {
-		x1 := NewMutex(db, root, "client1")
-		x2 := NewMutex(db, root, "client2")
+	tests := map[string]testFn{
+		"locked": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x1 := NewMutex(db, root, "")
+			x2 := NewMutex(db, root, "")
 
-		acquired, err := x1.TryAcquire(db)
-		require.NoError(t, err)
-		require.True(t, acquired)
+			acquired, err := x1.TryAcquire(db)
+			require.NoError(t, err)
+			require.True(t, acquired)
 
-		acquired, err = x2.TryAcquire(db)
-		require.NoError(t, err)
-		require.False(t, acquired)
+			acquired, err = x2.TryAcquire(db)
+			require.NoError(t, err)
+			require.False(t, acquired)
 
-		err = x1.Release(db)
-		require.NoError(t, err)
+			err = x1.Release(db)
+			require.NoError(t, err)
 
-		acquired, err = x2.TryAcquire(db)
-		require.NoError(t, err)
-		require.True(t, acquired)
-	})
+			acquired, err = x2.TryAcquire(db)
+			require.NoError(t, err)
+			require.True(t, acquired)
+		},
+		"heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x := NewMutex(db, root, "")
+
+			_, err := x.TryAcquire(db)
+			require.NoError(t, err)
+
+			// Wait for goroutine to update heartbeat.
+			time.Sleep(1500 * time.Millisecond)
+
+			_, hbeat, err := x.getOwner(db)
+			require.NoError(t, err)
+			require.NotEmpty(t, hbeat)
+		},
+	}
+
+	runTests(t, tests)
 }
 
 type testFn func(t *testing.T, db fdb.Database, root subspace.Subspace)
