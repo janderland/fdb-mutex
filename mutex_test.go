@@ -156,7 +156,31 @@ func TestTryAcquire(t *testing.T) {
 
 func TestAutoRelease(t *testing.T) {
 	tests := map[string]testFn {
-		"release": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+		"empty": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x, err := NewMutex(db, root, "client")
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			goAutoRelease(t, x, ctx, db, 500*time.Millisecond)
+
+			acquired, err := x.TryAcquire(db)
+			require.NoError(t, err)
+			require.True(t, acquired)
+
+			// Stop heartbeating so auto release is triggered.
+			x.stopBeating()
+
+			// Wait for owner to be auto-released.
+			<-x.watchOwner(context.Background(), db)
+
+			owner, err := x.getOwner(db)
+			require.NoError(t, err)
+			require.Empty(t, owner.name)
+			require.Empty(t, owner.hbeat)
+		},
+		"acquired": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x, err := NewMutex(db, root, "client")
 			require.NoError(t, err)
 
@@ -170,18 +194,7 @@ func TestAutoRelease(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			go func() {
-				err := AutoRelease(ctx, db, root, 500*time.Millisecond)
-				if err != nil {
-					var fdbErr fdb.Error
-					if errors.As(err, &fdbErr) && fdbErr.Code == 1101 {
-						// Ignore "operation cancelled" errors.
-						return
-					}
-
-					t.Errorf("auto release exited: %v", err)
-				}
-			}()
+			goAutoRelease(t, x, ctx, db, 500*time.Millisecond)
 
 			// Wait for owner to be auto-released.
 			<-x.watchOwner(context.Background(), db)
@@ -190,6 +203,8 @@ func TestAutoRelease(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, owner.name)
 			require.Empty(t, owner.hbeat)
+		},
+		"heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 		},
 	}
 
@@ -230,4 +245,18 @@ func runTest(t *testing.T, test testFn) {
 	}()
 
 	test(t, db, root)
+}
+
+func goAutoRelease(t *testing.T, x Mutex, ctx context.Context, db fdb.Database, maxAge time.Duration) {
+	go func() {
+		err := x.AutoRelease(ctx, db, maxAge)
+		if err != nil {
+			var ferr fdb.Error
+			if errors.As(err, &ferr) && ferr.Code == 1101 {
+				// Ignore "operation cancelled" errors.
+				return
+			}
+			t.Errorf("auto release exited: %v", err)
+		}
+	}()
 }

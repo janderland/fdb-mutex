@@ -15,8 +15,6 @@ import (
 type Mutex struct {
 	kv
 	name string
-
-	// stops background heartbeats
 	stop chan struct{}
 }
 
@@ -52,21 +50,19 @@ func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) (Mutex, er
 
 // AutoRelease runs a loop that checks if the current owner's latest heartbeat is older than the specified duration.
 // If so, the owner is assumed to have died and the mutex is released. Multiple instances of this function may be run.
-func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, maxAge time.Duration) error {
-	kv := kv{root}
-
+func (x *Mutex) AutoRelease(ctx context.Context, db fdb.Database, maxAge time.Duration) error {
 	// NOTE: We cannot defer a call to cancel because
 	// the variable is reassigned at the end of each
 	// loop. We need the newest cancel function to be
 	// called before we leave the function, so we must
 	// manually call it at every return point.
 	childCtx, cancel := context.WithCancel(ctx)
-	watch := kv.watchOwner(childCtx, db)
+	watch := x.watchOwner(childCtx, db)
 
 	timer := time.NewTimer(maxAge)
 	tstamp := time.Now()
 
-	owner, err := kv.getOwner(db)
+	owner, err := x.getOwner(db)
 	if err != nil {
 		return fmt.Errorf("failed to get owner: %v", err)
 	}
@@ -85,7 +81,7 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 
 		// Check the age of the heartbeat and release the mutex if necessary.
 		ret, err := db.Transact(func(tr fdb.Transaction) (any, error) {
-			curOwner, err := kv.getOwner(tr)
+			curOwner, err := x.getOwner(tr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get owner: %w", err)
 			}
@@ -104,11 +100,11 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 
 			// The owner hasn't sent a heartbeat in a while.
 			// Assume they are dead and release the lock.
-			name, err := kv.dequeue(tr)
+			name, err := x.dequeue(tr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to dequeue: %w", err)
 			}
-			err = kv.setOwner(tr, name)
+			err = x.setOwner(tr, name)
 			if err != nil {
 				return nil, fmt.Errorf("failed to set owner: %w", err)
 			}
@@ -126,7 +122,6 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 		switch {
 		case owner.name != curOwner.name:
 			fallthrough
-
 		case !bytes.Equal(owner.hbeat, curOwner.hbeat):
 			tstamp = time.Now()
 			timer.Reset(maxAge)
@@ -138,7 +133,7 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 		// in case the owner has changed during this cycle.
 		cancel()
 		childCtx, cancel = context.WithCancel(ctx)
-		watch = kv.watchOwner(childCtx, db)
+		watch = x.watchOwner(childCtx, db)
 	}
 }
 
