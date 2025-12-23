@@ -48,8 +48,9 @@ func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) (Mutex, er
 	}, nil
 }
 
-// AutoRelease runs a loop that checks if the current owner's latest heartbeat is older than the specified duration.
-// If so, the owner is assumed to have died and the mutex is released. Multiple instances of this function may be run.
+// AutoRelease runs a loop that checks if the current owner's latest heartbeat is older than the
+// specified duration. If so, the owner is assumed to have died and the mutex is released.
+// Multiple instances of this function may be run.
 func (x *Mutex) AutoRelease(ctx context.Context, db fdb.Database, maxAge time.Duration) error {
 	// NOTE: We cannot defer a call to cancel because
 	// the variable is reassigned at the end of each
