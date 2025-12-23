@@ -111,9 +111,9 @@ func TestKV(t *testing.T) {
 	runTests(t, tests)
 }
 
-func TestTryAcquire(t *testing.T) {
+func TestAcquire(t *testing.T) {
 	tests := map[string]testFn{
-		"locked": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+		"non-blocking": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x1, err := NewMutex(db, root, "")
 			require.NoError(t, err)
 
@@ -134,6 +134,33 @@ func TestTryAcquire(t *testing.T) {
 			acquired, err = x2.TryAcquire(db)
 			require.NoError(t, err)
 			require.True(t, acquired)
+		},
+		"blocking": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x1, err := NewMutex(db, root, "client1")
+			require.NoError(t, err)
+
+			x2, err := NewMutex(db, root, "client2")
+			require.NoError(t, err)
+
+			err = x1.Acquire(context.Background(), db)
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			defer cancel()
+
+			go func() {
+				<-ctx.Done()
+				if err := x1.Release(db); err != nil {
+					t.Errorf("failed to release: %v", err)
+				}
+			}()
+
+			err = x2.Acquire(context.Background(), db)
+			require.NoError(t, err)
+
+			owner, err := x2.getOwner(db)
+			require.NoError(t, err)
+			require.Equal(t, owner.name, "client2")
 		},
 		"heartbeat": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
 			x, err := NewMutex(db, root, "")

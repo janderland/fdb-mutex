@@ -167,6 +167,46 @@ func (x *Mutex) TryAcquire(db fdb.Database) (bool, error) {
 	return false, nil
 }
 
+func (x *Mutex) Acquire(ctx context.Context, db fdb.Database) error {
+	acquired, err := x.TryAcquire(db)
+	if err != nil {
+		return fmt.Errorf("failed to try aquire: %w", err)
+	}
+	if acquired {
+		return nil
+	}
+
+	for {
+		watch, err := db.Transact(func(tr fdb.Transaction) (any, error) {
+			owner, err := x.getOwner(tr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get owner: %w", err)
+			}
+
+			// Return a nil watch to signal that
+			// we are now the owner of the mutex.
+			if owner.name == x.name {
+				return nil, nil
+			}
+
+			return x.watchOwner(ctx, tr), nil
+		})
+		if err != nil {
+			return err
+		}
+
+		// If watch is nil then we are the owner.
+		// Otherwise, wait for the watch to fire
+		// and check again.
+		if watch == nil {
+			return nil
+		}
+		if err := <-watch.(<-chan error); err != nil {
+			return fmt.Errorf("failed to watch owner: %w", err)
+		}
+	}
+}
+
 func (x *Mutex) Release(db fdb.Transactor) error {
 	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		owner, err := x.getOwner(tr)
@@ -193,11 +233,14 @@ func (x *Mutex) release(db fdb.Transactor) (string, error) {
 	name, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		name, err := x.dequeue(tr)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		return name, x.setOwner(tr, name)
 	})
-	return name.(string), err
+	if err != nil {
+		return "", err
+	}
+	return name.(string), nil
 }
 
 func (x *Mutex) startBeating(db fdb.Database) {
