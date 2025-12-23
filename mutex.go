@@ -101,13 +101,9 @@ func (x *Mutex) AutoRelease(ctx context.Context, db fdb.Database, maxAge time.Du
 
 			// The owner hasn't sent a heartbeat in a while.
 			// Assume they are dead and release the lock.
-			name, err := x.dequeue(tr)
+			name, err := x.release(tr)
 			if err != nil {
-				return nil, fmt.Errorf("failed to dequeue: %w", err)
-			}
-			err = x.setOwner(tr, name)
-			if err != nil {
-				return nil, fmt.Errorf("failed to set owner: %w", err)
+				return nil, fmt.Errorf("failed to release mutex: %w", err)
 			}
 			return ownerKV{name: name}, nil
 		})
@@ -182,12 +178,8 @@ func (x *Mutex) Release(db fdb.Transactor) error {
 			return nil, nil
 		}
 
-		name, err := x.dequeue(tr)
-		if err != nil {
-			return nil, err
-		}
-
-		return nil, x.setOwner(tr, name)
+		_, err = x.release(tr)
+		return nil, err
 	})
 	if err != nil {
 		return err
@@ -195,6 +187,17 @@ func (x *Mutex) Release(db fdb.Transactor) error {
 
 	x.stopBeating()
 	return nil
+}
+
+func (x *Mutex) release(db fdb.Transactor) (string, error) {
+	name, err := db.Transact(func(tr fdb.Transaction) (any, error) {
+		name, err := x.dequeue(tr)
+		if err != nil {
+			return "", err
+		}
+		return name, x.setOwner(tr, name)
+	})
+	return name.(string), err
 }
 
 func (x *Mutex) startBeating(db fdb.Database) {
