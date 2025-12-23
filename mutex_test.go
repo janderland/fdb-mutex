@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 
@@ -141,13 +142,54 @@ func TestTryAcquire(t *testing.T) {
 			_, err = x.TryAcquire(db)
 			require.NoError(t, err)
 
-			// Wait more than 1s to ensure the owner
-			// updates it's heartbeat.
-			time.Sleep(1500 * time.Millisecond)
+			// Wait for the heartbeat to update.
+			<-x.watchOwner(context.Background(), db)
 
 			owner, err := x.getOwner(db)
 			require.NoError(t, err)
 			require.NotEmpty(t, owner.hbeat)
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestAutoRelease(t *testing.T) {
+	tests := map[string]testFn {
+		"release": func(t *testing.T, db fdb.Database, root subspace.Subspace) {
+			x, err := NewMutex(db, root, "client")
+			require.NoError(t, err)
+
+			acquired, err := x.TryAcquire(db)
+			require.NoError(t, err)
+			require.True(t, acquired)
+
+			// Stop heartbeating so auto release is triggered.
+			x.stopBeating()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			go func() {
+				err := AutoRelease(ctx, db, root, 500*time.Millisecond)
+				if err != nil {
+					var fdbErr fdb.Error
+					if errors.As(err, &fdbErr) && fdbErr.Code == 1101 {
+						// Ignore "operation cancelled" errors.
+						return
+					}
+
+					t.Errorf("auto release exited: %v", err)
+				}
+			}()
+
+			// Wait for owner to be auto-released.
+			<-x.watchOwner(context.Background(), db)
+
+			owner, err := x.getOwner(db)
+			require.NoError(t, err)
+			require.Empty(t, owner.name)
+			require.Empty(t, owner.hbeat)
 		},
 	}
 

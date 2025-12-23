@@ -55,9 +55,6 @@ func NewMutex(db fdb.Transactor, root subspace.Subspace, name string) (Mutex, er
 func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, maxAge time.Duration) error {
 	kv := kv{root}
 
-	// Initial setup for watch and timer. These two
-	// will be reinitialized at the end of each loop.
-	//
 	// NOTE: We cannot defer a call to cancel because
 	// the variable is reassigned at the end of each
 	// loop. We need the newest cancel function to be
@@ -65,10 +62,14 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 	// manually call it at every return point.
 	childCtx, cancel := context.WithCancel(ctx)
 	watch := kv.watchOwner(childCtx, db)
-	timer := time.NewTimer(maxAge)
 
-	var tstamp time.Time
-	var owner ownerKV
+	timer := time.NewTimer(maxAge)
+	tstamp := time.Now()
+
+	owner, err := kv.getOwner(db)
+	if err != nil {
+		return fmt.Errorf("failed to get owner: %v", err)
+	}
 
 	for {
 		// Wait for the watch or timer to fire.
@@ -76,7 +77,7 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 		case err := <-watch:
 			if err != nil {
 				cancel()
-				return fmt.Errorf("failed to wait on watch", err)
+				return fmt.Errorf("failed to wait on watch: %w", err)
 			}
 
 		case <-timer.C:
@@ -86,7 +87,7 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 		ret, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 			curOwner, err := kv.getOwner(tr)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to get owner: %w", err)
 			}
 
 			// If the owner changed, the heartbeat was updated,
@@ -95,9 +96,9 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 			switch {
 			case owner.name != curOwner.name:
 				fallthrough
-			case bytes.Compare(owner.hbeat, curOwner.hbeat) != 0:
+			case !bytes.Equal(owner.hbeat, curOwner.hbeat):
 				fallthrough
-			case time.Now().Sub(tstamp) < maxAge:
+			case time.Since(tstamp) < maxAge:
 				return curOwner, nil
 			}
 
@@ -105,32 +106,32 @@ func AutoRelease(ctx context.Context, db fdb.Database, root subspace.Subspace, m
 			// Assume they are dead and release the lock.
 			name, err := kv.dequeue(tr)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to dequeue: %w", err)
 			}
 			err = kv.setOwner(tr, name)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to set owner: %w", err)
 			}
 			return ownerKV{name: name}, nil
 		})
 		if err != nil {
 			cancel()
-			return fmt.Errorf("failed to handle watch trigger: %w", err)
+			return err
 		}
 
 		curOwner := ret.(ownerKV)
 
-		// If the owner or heartbeat was updated,
-		// the update timer as well.
+		// If the owner or heartbeat was updated, then
+		// store the new ownerKV and reset the timer.
 		switch {
 		case owner.name != curOwner.name:
 			fallthrough
-		case bytes.Compare(owner.hbeat, curOwner.hbeat) != 0:
-			tstamp = time.Now()
-			_ = timer.Reset(maxAge)
-		}
 
-		owner = curOwner
+		case !bytes.Equal(owner.hbeat, curOwner.hbeat):
+			tstamp = time.Now()
+			timer.Reset(maxAge)
+			owner = curOwner
+		}
 
 		// Cancel the current watch and create a new one.
 		// This ensures we are watching the latest owner KV
