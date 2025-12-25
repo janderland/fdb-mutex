@@ -4,20 +4,20 @@ volumes:
 services:
   build:
     build:
-      context: ./docker
-      dockerfile: Dockerfile
-    platform: linux/amd64
+      context: .
+      args:
+        FENV_DOCKER_TAG: "${FENV_DOCKER_TAG}"
+    platform: "linux/amd64"
     depends_on:
       - fdb
-    working_dir: /src
+    working_dir: "/src"
     volumes:
-      - .:/src
-      - cache:/cache
-    command: >
-      sh -c './scripts/setup_database.sh && ./scripts/verify_codebase.sh'
+      - ".:/src"
+      - "${FENV_CACHE_VOLUME:-cache}:/cache"
 
   fdb:
-    image: foundationdb/foundationdb:7.4.5
-    platform: linux/arm64
+    container_name: "fdb"
+    image: "foundationdb/foundationdb:${FENV_FDB_VER:-7.1.61}"
+    platform: "linux/amd64"
     ports:
-      - 4500:4500
+      - "4500:4500"

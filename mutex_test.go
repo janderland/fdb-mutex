@@ -250,7 +250,7 @@ func runTests(t *testing.T, tests map[string]testFn) {
 }
 
 func runTest(t *testing.T, test testFn) {
-	fdb.MustAPIVersion(730)
+	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
 
 	// Generate a random directory name.
