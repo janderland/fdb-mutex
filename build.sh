@@ -16,11 +16,12 @@ export FENV_FDB_VER
 ./fenv/build.sh --image
 docker compose build
 
-# Lint shell scripts (exclude fenv submodule).
-docker compose run --rm build \
-  sh -c "find . -path ./fenv -prune -o -type f -iname '*.sh' -print0 | xargs -0 shellcheck"
-
-# Build, lint, & test Go code.
-docker compose run --rm build go build ./...
-docker compose run --rm build golangci-lint run ./...
-docker compose run --rm build go test ./... -timeout 5s
+# Lint, build, & test.
+docker compose run --rm build sh -c '
+  set -ex
+  shellcheck build.sh
+  hadolint Dockerfile
+  go build ./...
+  golangci-lint run ./...
+  go test ./... -timeout 5s
+'

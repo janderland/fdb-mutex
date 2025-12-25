@@ -15,5 +15,3 @@ ARG GOLANGCI_LINT_VER=1.62.2
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | \
     sh -s -- -b /usr/local/bin v${GOLANGCI_LINT_VER}
 ENV GOLANGCI_LINT_CACHE="/cache/golangci-lint"
-
-ENTRYPOINT ["/shim.sh"]
