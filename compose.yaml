@@ -1,23 +1,9 @@
-volumes:
-  cache:
-
 services:
   build:
     build:
-      context: .
+      context: ..
+      dockerfile: Dockerfile
       args:
         FENV_DOCKER_TAG: "${FENV_DOCKER_TAG}"
-    platform: "linux/amd64"
-    depends_on:
-      - fdb
-    working_dir: "/src"
     volumes:
-      - ".:/src"
-      - "${FENV_CACHE_VOLUME:-cache}:/cache"
-
-  fdb:
-    container_name: "fdb"
-    image: "foundationdb/foundationdb:${FENV_FDB_VER:-7.1.61}"
-    platform: "linux/amd64"
-    ports:
-      - "4500:4500"
+      - "..:/src"

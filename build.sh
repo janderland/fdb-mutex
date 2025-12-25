@@ -14,10 +14,10 @@ export FENV_FDB_VER
 
 # Build images.
 ./fenv/build.sh --image
-docker compose build
+docker compose -f ./fenv/compose.yaml -f compose.yaml build
 
 # Lint, build, & test.
-docker compose run --rm build sh -c '
+docker compose -f ./fenv/compose.yaml -f compose.yaml run --rm build sh -c '
   set -ex
   shellcheck build.sh
   hadolint Dockerfile

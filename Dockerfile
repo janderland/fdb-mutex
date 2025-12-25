@@ -1,6 +1,8 @@
 ARG FENV_DOCKER_TAG=latest
 FROM janderland/fenv:${FENV_DOCKER_TAG}
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Install Go.
 ARG GO_VER=1.23.4
 RUN curl -Lo /go.tar.gz https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz && \
