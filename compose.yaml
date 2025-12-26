@@ -1,9 +1,5 @@
 services:
   build:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-      args:
-        FENV_DOCKER_TAG: "${FENV_DOCKER_TAG}"
+    image: "fdb-mutex:${FDB_MUTEX_DOCKER_TAG}"
     volumes:
-      - "..:/src"
+      - ".:/src"

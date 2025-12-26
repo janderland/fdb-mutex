@@ -4,20 +4,15 @@ set -eo pipefail
 # Change directory to the script's location (repo root).
 cd "${0%/*}"
 
-# Set environment variables for docker compose.
-# Run docker_tag.sh from fenv directory so it uses fenv's git hash.
-FENV_DOCKER_TAG="$(cd fenv && ./docker_tag.sh)"
-export FENV_DOCKER_TAG
-
-FENV_FDB_VER="${FENV_FDB_VER:-7.1.61}"
-export FENV_FDB_VER
+# Set image tag based on this repo's commit hash.
+FDB_MUTEX_DOCKER_TAG="$(./fenv/docker_tag.sh)"
+export FDB_MUTEX_DOCKER_TAG
 
 # Build images.
-./fenv/build.sh --image
-docker compose -f ./fenv/compose.yaml -f compose.yaml build
+./fenv/build.sh --bake ./bake.hcl --image
 
 # Lint, build, & test.
-docker compose -f ./fenv/compose.yaml -f compose.yaml run --rm build sh -c '
+./fenv/build.sh --compose ./compose.yaml --exec sh -c '
   set -ex
   shellcheck build.sh
   hadolint Dockerfile
