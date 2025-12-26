@@ -2,13 +2,13 @@ variable "FENV_DOCKER_TAG" {
   default = "latest"
 }
 
-variable "FDB_MUTEX_DOCKER_TAG" {
+variable "FENV_EXT_DOCKER_TAG" {
   default = "latest"
 }
 
 target "build" {
   dockerfile = "Dockerfile"
-  tags       = ["fdb-mutex:${FDB_MUTEX_DOCKER_TAG}"]
+  tags       = ["fdb-mutex:${FENV_EXT_DOCKER_TAG}"]
   platforms  = ["linux/amd64"]
   args = {
     FENV_DOCKER_TAG = FENV_DOCKER_TAG

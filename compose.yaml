@@ -1,5 +1,5 @@
 services:
   build:
-    image: "fdb-mutex:${FDB_MUTEX_DOCKER_TAG}"
+    image: "fdb-mutex:${FENV_EXT_DOCKER_TAG}"
     volumes:
       - ".:/src"
