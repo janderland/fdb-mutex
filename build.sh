@@ -5,13 +5,13 @@ set -eo pipefail
 cd "${0%/*}"
 
 # Build images.
-./fenv/fenv.sh --bake ./bake.hcl --image
+./fenv/fenv.sh --bake ./docker/bake.hcl --image
 
 # Lint, build, & test.
-./fenv/fenv.sh --compose ./compose.yaml --exec sh -c '
+./fenv/fenv.sh --compose ./docker/compose.yaml --exec sh -c '
   set -ex
   shellcheck build.sh
-  hadolint Dockerfile
+  hadolint docker/Dockerfile
   go build ./...
   golangci-lint run ./...
   go test ./... -timeout 5s
