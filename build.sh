@@ -5,10 +5,10 @@ set -eo pipefail
 cd "${0%/*}"
 
 # Build images.
-./fenv/build.sh --bake ./bake.hcl --image
+./fenv/fenv.sh --bake ./bake.hcl --image
 
 # Lint, build, & test.
-./fenv/build.sh --compose ./compose.yaml --exec sh -c '
+./fenv/fenv.sh --compose ./compose.yaml --exec sh -c '
   set -ex
   shellcheck build.sh
   hadolint Dockerfile
