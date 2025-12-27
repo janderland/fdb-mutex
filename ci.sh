@@ -4,11 +4,8 @@ set -eo pipefail
 # Change directory to the script's location (repo root).
 cd "${0%/*}"
 
-# Build images.
-./fenv/fenv.sh --bake ./docker/bake.hcl --build
-
 # Lint, build, & test.
-./fenv/fenv.sh --compose ./docker/compose.yaml --exec sh -c '
+./fenv/fenv.sh --bake ./docker/bake.hcl --build --exec sh -c '
   set -ex
   shellcheck ci.sh
   hadolint docker/Dockerfile

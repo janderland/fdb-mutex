@@ -1,3 +1,0 @@
-services:
-  fenv:
-    image: "fdb-mutex:${FENV_EXT_DOCKER_TAG}"
