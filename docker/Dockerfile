@@ -1,5 +1,5 @@
 ARG FENV_DOCKER_TAG=latest
-FROM janderland/fenv:${FENV_DOCKER_TAG}
+FROM fenv:${FENV_DOCKER_TAG}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
