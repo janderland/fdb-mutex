@@ -18,8 +18,7 @@ jobs:
       - name: Setup fenv
         uses: ./fenv
         with:
-          ext_bake: './docker/bake.hcl'
-          ext_image_name: 'fdb-mutex'
+          ext_dockerfile: './docker/Dockerfile'
 
       - name: Run build and tests
         run: ./ci.sh
