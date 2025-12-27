@@ -5,7 +5,7 @@ set -eo pipefail
 cd "${0%/*}"
 
 # Build images.
-./fenv/fenv.sh --bake ./docker/bake.hcl --image
+./fenv/fenv.sh --bake ./docker/bake.hcl --build
 
 # Lint, build, & test.
 ./fenv/fenv.sh --compose ./docker/compose.yaml --exec sh -c '
