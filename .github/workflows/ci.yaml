@@ -18,7 +18,7 @@ jobs:
       - name: Setup fenv
         uses: ./fenv
         with:
-          ext_dockerfile: './docker/Dockerfile'
+          ext_dockerfile: './Dockerfile'
 
       - name: Run build and tests
         run: ./ci.sh
