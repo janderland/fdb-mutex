@@ -22,4 +22,4 @@ jobs:
           ext_image_name: 'fdb-mutex'
 
       - name: Run build and tests
-        run: ./build.sh
+        run: ./ci.sh
