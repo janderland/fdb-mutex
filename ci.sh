@@ -10,7 +10,7 @@ cd "${0%/*}"
 # Lint, build, & test.
 ./fenv/fenv.sh --compose ./docker/compose.yaml --exec sh -c '
   set -ex
-  shellcheck build.sh
+  shellcheck ci.sh
   hadolint docker/Dockerfile
   go build ./...
   golangci-lint run ./...
