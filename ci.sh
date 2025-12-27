@@ -5,7 +5,7 @@ set -eo pipefail
 cd "${0%/*}"
 
 # Lint, build, & test.
-./fenv/fenv.sh --bake ./docker/bake.hcl --build --exec sh -c '
+./fenv/fenv.sh --docker ./docker/Dockerfile --build --exec sh -c '
   set -ex
   shellcheck ci.sh
   hadolint docker/Dockerfile
