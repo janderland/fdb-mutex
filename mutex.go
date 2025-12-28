@@ -138,7 +138,7 @@ func (x *Mutex) TryAcquire(db fdb.Database) (bool, error) {
 	acquired, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		owner, err := x.getOwner(tr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get owner: %w", err)
 		}
 
 		switch owner.name {
@@ -148,7 +148,7 @@ func (x *Mutex) TryAcquire(db fdb.Database) (bool, error) {
 		case "":
 			err := x.setOwner(tr, x.name)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to set owner: %w", err)
 			}
 			return true, nil
 
@@ -211,7 +211,7 @@ func (x *Mutex) Release(db fdb.Transactor) error {
 	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		owner, err := x.getOwner(tr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get owner: %w", err)
 		}
 
 		if x.name != owner.name {
@@ -233,7 +233,7 @@ func (x *Mutex) release(db fdb.Transactor) (string, error) {
 	name, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		name, err := x.dequeue(tr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to dequeue: %w", err)
 		}
 		return name, x.setOwner(tr, name)
 	})

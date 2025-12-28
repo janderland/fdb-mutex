@@ -23,7 +23,7 @@ type kv struct{ subspace.Subspace }
 func (x *kv) setOwner(db fdb.Transactor, name string) error {
 	rngOwner, err := x.packOwnerRange()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to pack owner range: %w", err)
 	}
 
 	_, err = db.Transact(func(tr fdb.Transaction) (any, error) {
@@ -42,7 +42,7 @@ func (x *kv) setOwner(db fdb.Transactor, name string) error {
 func (x *kv) getOwner(db fdb.Transactor) (ownerKV, error) {
 	rngRoot, err := x.packOwnerRange()
 	if err != nil {
-		return ownerKV{}, err
+		return ownerKV{}, fmt.Errorf("failed to pack owner range: %w", err)
 	}
 
 	owner, err := db.ReadTransact(func(tr fdb.ReadTransaction) (any, error) {
@@ -78,7 +78,7 @@ func (x *kv) watchOwner(ctx context.Context, db fdb.Transactor) <-chan error {
 	ret, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		owner, err := x.getOwner(tr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get owner: %w", err)
 		}
 		return tr.Watch(x.packOwnerKey(owner.name)), nil
 	})
@@ -112,7 +112,7 @@ func (x *kv) heartbeat(db fdb.Transactor, name string) error {
 	_, err := db.Transact(func(tr fdb.Transaction) (any, error) {
 		owner, err := x.getOwner(db)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get owner: %w", err)
 		}
 
 		// If we're not the owner, don't heartbeat.
@@ -132,7 +132,7 @@ func (x *kv) heartbeat(db fdb.Transactor, name string) error {
 func (x *kv) enqueue(db fdb.Transactor, name string) error {
 	rngQueue, err := x.packQueueRange()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to pack queue range: %w", err)
 	}
 
 	_, err = db.Transact(func(tr fdb.Transaction) (any, error) {
@@ -161,7 +161,7 @@ func (x *kv) enqueue(db fdb.Transactor, name string) error {
 func (x *kv) dequeue(db fdb.Transactor) (string, error) {
 	rng, err := x.packQueueRange()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to pack queue range: %w", err)
 	}
 
 	name, err := db.Transact(func(tr fdb.Transaction) (any, error) {
